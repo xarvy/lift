@@ -31,10 +31,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--t);font-f
 .page.slide-out-right{transform:translateX(100%);opacity:0;pointer-events:none}
 .page.slide-in-right{transform:translateX(0);opacity:1}
 .page-home{transform:translateX(0);opacity:1;z-index:1}
-.page-workout,.page-history,.page-cal,.page-cal-onboard{transform:translateX(100%);opacity:0;pointer-events:none;z-index:2}
+.page-workout,.page-history,.page-cal{transform:translateX(100%);opacity:0;pointer-events:none;z-index:2}
+.page-cal-onboard{transform:translateX(100%);opacity:0;pointer-events:none;z-index:2;overflow-y:auto;-webkit-overflow-scrolling:touch}
 
 /* BOTTOM NAV */
-.bnav{position:fixed;bottom:0;left:0;right:0;z-index:50;background:var(--bg);border-top:1px solid var(--border);display:flex;padding:8px 0;padding-bottom:max(env(safe-area-inset-bottom,8px),8px)}
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:50;background:var(--bg);border-top:1px solid var(--border);display:flex;padding:8px 0;padding-bottom:max(env(safe-area-inset-bottom,8px),8px);transition:transform 0.3s ease,opacity 0.3s ease}
+.bnav.hidden{transform:translateY(100%);opacity:0;pointer-events:none}
 .bnav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:4px;border:none;background:none;color:var(--t3);font-family:var(--font);transition:color 0.15s;-webkit-appearance:none}
 .bnav-btn.active{color:var(--g)}
 .bnav-btn.cal-active{color:var(--cal)}
@@ -246,7 +248,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--t);font-f
 .gb-sub{font-size:11px;color:var(--t2);margin-top:2px;line-height:1.4}
 
 /* CAL ONBOARDING */
-.onboard-wrap{display:flex;flex-direction:column;height:100dvh;padding:max(env(safe-area-inset-top),32px) 24px 40px}
+.onboard-wrap{display:flex;flex-direction:column;min-height:100dvh;padding:max(env(safe-area-inset-top),32px) 24px max(env(safe-area-inset-bottom,40px),40px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .onboard-top{margin-bottom:32px}
 .onboard-top .ob-icon{font-size:48px;margin-bottom:16px}
 .onboard-top h2{font-size:28px;font-weight:800;letter-spacing:-1px;margin-bottom:8px}
@@ -272,7 +274,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--t);font-f
 .ob-goal-btn .og-name{font-size:15px;font-weight:700;margin-bottom:3px}
 .ob-goal-btn .og-sub{font-size:12px;color:var(--t2)}
 .ob-goal-btn.sel{border-color:rgba(249,115,22,0.4);background:var(--caldim)}
-.ob-btn{width:100%;padding:14px;background:var(--cal);color:#fff;border:none;border-radius:var(--rsm);font-size:15px;font-weight:800;cursor:pointer;font-family:var(--font);-webkit-appearance:none;transition:all 0.15s;margin-top:auto}
+.ob-btn{width:100%;padding:14px;background:var(--cal);color:#fff;border:none;border-radius:var(--rsm);font-size:15px;font-weight:800;cursor:pointer;font-family:var(--font);-webkit-appearance:none;transition:all 0.15s;margin-top:20px}
 .ob-btn:active{transform:scale(0.97)}
 .ob-btn:disabled{background:var(--bg4);color:var(--t3);cursor:default}
 .ob-step-dots{display:flex;gap:6px;justify-content:center;margin-bottom:24px}
@@ -582,6 +584,7 @@ function showWorkout(di){
   document.getElementById('editBtn').textContent='Edit';
   renderWorkout();
   navTo('pWorkout','pHome');
+  document.getElementById('bnav').classList.add('hidden');
   if(!timerIv)startTimer();
 }
 function goHome(){
@@ -589,6 +592,7 @@ function goHome(){
     const el=document.getElementById(id);
     if(el.style.pointerEvents!=='none'){navBack('pHome',id);}
   });
+  document.getElementById('bnav').classList.remove('hidden');
   if(timerIv){clearInterval(timerIv);timerIv=null;}
   renderHome();
 }
@@ -993,20 +997,46 @@ async function logFood(){
   btnText.innerHTML='<div class="spinner"></div> Analyzing...';
 
   try{
-    const prompt=`You are a precise nutrition expert. Analyze this meal and return ONLY a raw JSON object — no markdown, no explanation, no backticks, no extra text whatsoever.
-Meal: "${meal}"
-JSON structure (all numbers must be integers):
-{"meal":"concise name","totalKcal":number,"protein":number,"carbs":number,"fat":number,"items":[{"name":"item","kcal":number}]}
-Accurately estimate Arabic/Saudi foods like kabsa (~650 kcal), shawarma (~550 kcal), mandi (~700 kcal), harees (~450 kcal). Be realistic with portions.`;
-    const resp=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+GEMINI_KEY,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,maxOutputTokens:600}})
+    const promptLines=[
+      'You are a nutrition expert.',
+      'Analyze this meal: '+meal,
+      'Respond with ONLY a JSON object. No extra text, no markdown, no backticks.',
+      'Use this exact format where all numbers are integers:',
+      '{"meal":"meal name","totalKcal":500,"protein":30,"carbs":50,"fat":15,"items":[{"name":"item name","kcal":200}]}'
+    ];
+    const url='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+GEMINI_KEY;
+    const payload={
+      contents:[{parts:[{text:promptLines.join(' ')}]}],
+      generationConfig:{temperature:0,maxOutputTokens:600}
+    };
+    const data=await new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      xhr.open('POST',url,true);
+      xhr.setRequestHeader('Content-Type','application/json');
+      xhr.timeout=20000;
+      xhr.onload=function(){
+        console.log('Gemini status:',xhr.status);
+        console.log('Gemini raw:',xhr.responseText.substring(0,300));
+        try{resolve(JSON.parse(xhr.responseText));}
+        catch(e){reject(new Error('Bad response ('+xhr.status+'): '+xhr.responseText.substring(0,100)));}
+      };
+      xhr.onerror=function(){reject(new Error('Network error — check connection'));};
+      xhr.ontimeout=function(){reject(new Error('Timed out'));};
+      xhr.send(JSON.stringify(payload));
     });
-    const data=await resp.json();
-    if(!data.candidates||!data.candidates[0])throw new Error('No Gemini response');
+    if(data.error)throw new Error(data.error.message||JSON.stringify(data.error));
+    if(!data.candidates||!data.candidates[0])throw new Error('No candidates — possible safety block');
     const raw=data.candidates[0].content.parts[0].text.trim();
-    const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
+    console.log('Gemini text:',raw);
+    // Find JSON — try direct parse first, then extract object
+    let parsed;
+    try{parsed=JSON.parse(raw);}
+    catch(e){
+      const m=raw.match(/\{[\s\S]*\}/);
+      if(!m)throw new Error('No JSON in: '+raw.substring(0,80));
+      parsed=JSON.parse(m[0]);
+    }
+    if(!parsed.totalKcal)parsed.totalKcal=parseInt(parsed.totalKcal||parsed.calories||0);
     const key=todayKey();
     if(!CAL.days[key])CAL.days[key]={entries:[]};
     CAL.days[key].entries.push(parsed);
@@ -1022,8 +1052,9 @@ Accurately estimate Arabic/Saudi foods like kabsa (~650 kcal), shawarma (~550 kc
     }
     renderCal();
   }catch(err){
-    showToast('Could not parse meal. Try again.');
-    console.error(err);
+    const msg=String(err.message||err).substring(0,60);
+    showToast(msg);
+    console.error('logFood error:',err);
   }finally{
     btn.disabled=false;
     btnText.textContent='🔥 Log meal with AI';
